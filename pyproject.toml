@@ -1,0 +1,9 @@
+[project]
+name = "chula-license"
+version = "0.1.0"
+description = "automate script to borrow adobe license"
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+    "playwright>=1.56.0",
+]
