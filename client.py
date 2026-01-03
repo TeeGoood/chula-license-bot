@@ -1,6 +1,6 @@
 import logging
 from datetime import datetime, timedelta
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, TypedDict
 
 import requests
 from bs4 import BeautifulSoup, Tag
@@ -14,10 +14,16 @@ BASE_URL = "https://licenseportal.it.chula.ac.th"
 URL_LOGIN = f"{BASE_URL}/"
 URL_BORROW = f"{BASE_URL}/Home/Borrow"
 
-LICENSE_IDS: Dict[str, str] = {
-    "adobe": "5",
-    "foxit": "7",
-    "zoom": "2",
+
+class LicenseConfig(TypedDict):
+    id: str
+    days: int
+
+
+LICENSES: Dict[str, LicenseConfig] = {
+    "adobe": {"id": "5", "days": 7},
+    "foxit": {"id": "7", "days": 90},
+    "zoom": {"id": "2", "days": 120},
 }
 
 
@@ -63,15 +69,11 @@ class PortalClient:
             if isinstance(sel, Tag):
                 name = sel.get("name")
 
-                # Ensure 'name' is a string
                 if isinstance(name, str):
                     selected = sel.find("option", selected=True)
                     if isinstance(selected, Tag):
                         val = selected.get("value", "")
-                        if isinstance(val, str):
-                            payload[name] = val
-                        else:
-                            payload[name] = str(val) if val is not None else ""
+                        payload[name] = str(val) if val is not None else ""
                     else:
                         payload[name] = ""
 
@@ -100,11 +102,16 @@ class PortalClient:
             raise PermissionError("Login failed. Check credentials.")
 
     def borrow(self, license_key: str) -> bool:
-        if license_key not in LICENSE_IDS:
+        if license_key not in LICENSES:
             logging.error(f"Unknown license key: {license_key}")
             return False
 
-        logging.info(f"Borrowing: {license_key}")
+        config = LICENSES[license_key]
+        days = config["days"]
+        license_id = config["id"]
+
+        logging.info(f"Borrowing: {license_key} (Duration: {days} days)")
+
         resp: Response = self.session.get(URL_BORROW)
         resp.raise_for_status()
 
@@ -117,9 +124,9 @@ class PortalClient:
         now = datetime.now()
         payload.update(
             {
-                "ProgramLicenseID": LICENSE_IDS[license_key],
+                "ProgramLicenseID": license_id,
                 "BorrowDateStr": now.strftime("%d/%m/%Y"),
-                "ExpiryDateStr": (now + timedelta(days=7)).strftime("%d/%m/%Y"),
+                "ExpiryDateStr": (now + timedelta(days=days)).strftime("%d/%m/%Y"),
             }
         )
 

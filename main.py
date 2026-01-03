@@ -8,7 +8,7 @@ from typing import Any, Dict
 
 from dotenv import load_dotenv
 
-from client import LICENSE_IDS, PortalClient
+from client import LICENSES, PortalClient
 
 STATE_FILE = "last_borrowed.pickle"
 
@@ -35,7 +35,7 @@ def main() -> None:
     )
 
     parser = argparse.ArgumentParser()
-    parser.add_argument("licenses", nargs="+", choices=list(LICENSE_IDS.keys()))
+    parser.add_argument("licenses", nargs="+", choices=list(LICENSES.keys()))
     args = parser.parse_args()
 
     email: str | None = os.getenv("LOGIN_EMAIL")
@@ -56,11 +56,17 @@ def main() -> None:
         for item in args.licenses:
             last_date: datetime | None = state.get(item)
 
-            if last_date and (now - last_date).days < 6:
-                logging.info(
-                    f"Skipping {item}: Already active ({(now - last_date).days} days old)."
-                )
-                continue
+            max_days = LICENSES[item]["days"]
+
+            renew_threshold = max_days - 1
+
+            if last_date:
+                days_active = (now - last_date).days
+                if days_active < renew_threshold:
+                    logging.info(
+                        f"Skipping {item}: Active for {days_active} days (Expires in {max_days - days_active} days)."
+                    )
+                    continue
 
             if client.borrow(item):
                 logging.info(f"Successfully borrowed {item}")
