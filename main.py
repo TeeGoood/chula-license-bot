@@ -1,111 +1,72 @@
+import argparse
 import logging
 import os
 import pickle
 import sys
-import textwrap
-from datetime import datetime, timedelta
+from datetime import datetime
 
 from dotenv import load_dotenv
-from playwright.sync_api import sync_playwright
+
+from client import LICENSE_IDS, PortalClient
+
+STATE_FILE = "last_borrowed.pickle"
+
+
+def load_state():
+    if not os.path.exists(STATE_FILE):
+        return {}
+    with open(STATE_FILE, "rb") as f:
+        return pickle.load(f)
+
+
+def save_state(data):
+    with open(STATE_FILE, "wb") as f:
+        pickle.dump(data, f)
 
 
 def main():
     load_dotenv()
-    setup_logger()
+    logging.basicConfig(
+        format="%(asctime)s [%(levelname)s] %(message)s", level=logging.INFO
+    )
 
-    url = "https://licenseportal.it.chula.ac.th"
-    email = os.getenv("LOGIN_EMAIL") or ""
-    password = os.getenv("LOGIN_PASSWORD") or ""
+    parser = argparse.ArgumentParser()
+    parser.add_argument("licenses", nargs="+", choices=LICENSE_IDS.keys())
+    args = parser.parse_args()
 
-    select_options = {
-        "adobe": "5",
-        "foxit": "7",
-        "zoom": "2",
-    }
+    email = os.getenv("LOGIN_EMAIL")
+    password = os.getenv("LOGIN_PASSWORD")
 
-    now = datetime.now()
-    start = now
-    end = start + timedelta(days=7)
+    if not email or not password:
+        logging.critical("Environment variables LOGIN_EMAIL or LOGIN_PASSWORD missing.")
+        sys.exit(1)
 
-    licenses = get_licenses()
-    last_borrowed = get_last_borrowed()
+    state = load_state()
+    client = PortalClient(email, password)
 
-    with sync_playwright() as playwright:
-        # setup
-        browser = playwright.chromium.launch(headless=True)
-        context = browser.new_context()
-        page = context.new_page()
+    try:
+        client.login()
 
-        # login
-        page.goto(url)
-        page.locator("#UserName").fill(email)
-        page.locator("#Password").fill(password)
-        page.locator("button[type='submit']").click()
+        now = datetime.now()
 
-        # borrow licenses
-        for license in licenses:
-            # check borrow period
-            if now - last_borrowed[license] < timedelta(days=6):
+        for item in args.licenses:
+            last_date = state.get(item)
+
+            if last_date and (now - last_date).days < 6:
                 logging.info(
-                    f"{license} don't reach borrow period, will be borrowed in {6 - (now - last_borrowed[license]).days} days"
+                    f"Skipping {item}: Already active ({(now - last_date).days} days old)."
                 )
                 continue
 
-            page.goto(f"{url}/Home/Borrow")
-            page.locator("#ProgramLicenseID").select_option(select_options[license])
-            page.locator("#BorrowDateStr").fill(start.strftime("%d/%m/%Y"))
-            page.keyboard.press("Escape")
-            page.locator("#ExpiryDateStr").fill(end.strftime("%d/%m/%Y"))
-            page.keyboard.press("Escape")
-            page.get_by_role("button", name="Save").click()
+            if client.borrow(item):
+                logging.info(f"Successfully borrowed {item}")
+                state[item] = now
 
-            last_borrowed[license] = now
-            logging.info(f"Borrow {license} success")
+        save_state(state)
 
-        pickle.dump(last_borrowed, open("last_borrowed.pickle", "wb"))
-
-
-def setup_logger():
-    logging.basicConfig(
-        format="%(asctime)s [%(levelname)s] %(message)s",
-        level=logging.INFO,
-    )
-
-
-def get_licenses():
-    if len(sys.argv) < 2:
-        print(
-            textwrap.dedent("""
-        Usage: python main.py <license> [<license> ...]
-
-        License:
-          foxit | zoom | adobe
-
-        Example:
-          python main.py foxit zoom
-      """)
-        )
-        exit(1)
-
-    return sys.argv[1:]
-
-
-def get_last_borrowed():
-    try:
-        with open("last_borrowed.pickle", "rb") as f:
-            last_borrowed = pickle.load(f)
-    except FileNotFoundError:
-        epoch = datetime.fromtimestamp(0)
-        last_borrowed = {
-            "adobe": epoch,
-            "foxit": epoch,
-            "zoom": epoch,
-        }
-    return last_borrowed
+    except Exception as e:
+        logging.exception(f"Runtime error: {e}")
 
 
 if __name__ == "__main__":
-    try:
-        main()
-    except Exception:
-        logging.exception("Borrow failed")
+    main()
