@@ -1,2 +1,2 @@
 # Chula license
-automate script to borrow adobe license
+Automate bot to borrow chula license
