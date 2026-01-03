@@ -1,8 +1,10 @@
 import logging
 from datetime import datetime, timedelta
+from typing import Any, Dict, Optional
 
 import requests
-from bs4 import BeautifulSoup
+from bs4 import BeautifulSoup, Tag
+from requests import Response, Session
 
 # Network debug
 # import urllib3
@@ -12,7 +14,7 @@ BASE_URL = "https://licenseportal.it.chula.ac.th"
 URL_LOGIN = f"{BASE_URL}/"
 URL_BORROW = f"{BASE_URL}/Home/Borrow"
 
-LICENSE_IDS = {
+LICENSE_IDS: Dict[str, str] = {
     "adobe": "5",
     "foxit": "7",
     "zoom": "2",
@@ -20,10 +22,10 @@ LICENSE_IDS = {
 
 
 class PortalClient:
-    def __init__(self, email, password):
-        self.email = email
-        self.password = password
-        self.session = requests.Session()
+    def __init__(self, email: str, password: str) -> None:
+        self.email: str = email
+        self.password: str = password
+        self.session: Session = requests.Session()
 
         self.session.headers.update(
             {
@@ -32,26 +34,52 @@ class PortalClient:
         )
         self.session.verify = False
 
-    def _get_form_payload(self, html, form_action=None):
+    def _get_form_payload(
+        self, html: str, form_action: Optional[str] = None
+    ) -> Dict[str, str]:
         soup = BeautifulSoup(html, "html.parser")
-        payload = {}
+        payload: Dict[str, str] = {}
 
-        container = soup.find("form", action=form_action) or soup
+        container: Any = soup
+        if form_action:
+            found_form = soup.find("form", action=form_action)
+            if found_form:
+                container = found_form
 
         for inp in container.find_all("input"):
-            if inp.get("name"):
-                payload[inp.get("name")] = inp.get("value", "")
+            if isinstance(inp, Tag):
+                name = inp.get("name")
+                value = inp.get("value", "")
+
+                if isinstance(name, str):
+                    if isinstance(value, str):
+                        payload[name] = value
+                    elif value is None:
+                        payload[name] = ""
+                    else:
+                        payload[name] = str(value)
 
         for sel in container.find_all("select"):
-            if sel.get("name"):
-                selected = sel.find("option", selected=True)
-                payload[sel.get("name")] = selected["value"] if selected else ""
+            if isinstance(sel, Tag):
+                name = sel.get("name")
+
+                # Ensure 'name' is a string
+                if isinstance(name, str):
+                    selected = sel.find("option", selected=True)
+                    if isinstance(selected, Tag):
+                        val = selected.get("value", "")
+                        if isinstance(val, str):
+                            payload[name] = val
+                        else:
+                            payload[name] = str(val) if val is not None else ""
+                    else:
+                        payload[name] = ""
 
         return payload
 
-    def login(self):
+    def login(self) -> None:
         logging.info("Logging in...")
-        resp = self.session.get(URL_LOGIN)
+        resp: Response = self.session.get(URL_LOGIN)
         resp.raise_for_status()
 
         payload = self._get_form_payload(resp.text)
@@ -66,18 +94,18 @@ class PortalClient:
             }
         )
 
-        post = self.session.post(URL_LOGIN, data=payload)
+        post: Response = self.session.post(URL_LOGIN, data=payload)
 
         if "UserName" in post.text and "Password" in post.text:
             raise PermissionError("Login failed. Check credentials.")
 
-    def borrow(self, license_key):
+    def borrow(self, license_key: str) -> bool:
         if license_key not in LICENSE_IDS:
             logging.error(f"Unknown license key: {license_key}")
             return False
 
         logging.info(f"Borrowing: {license_key}")
-        resp = self.session.get(URL_BORROW)
+        resp: Response = self.session.get(URL_BORROW)
         resp.raise_for_status()
 
         payload = self._get_form_payload(resp.text, form_action="/Home/Borrow")
@@ -95,7 +123,7 @@ class PortalClient:
             }
         )
 
-        post = self.session.post(URL_BORROW, data=payload)
+        post: Response = self.session.post(URL_BORROW, data=payload)
 
         if post.history and post.history[0].status_code == 302:
             return True
