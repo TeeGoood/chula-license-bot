@@ -15,3 +15,7 @@ wheels/
 
 log
 last_borrowed.pickle
+
+# Nix
+.direnv/
+result/
