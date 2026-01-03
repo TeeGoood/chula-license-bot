@@ -11,7 +11,7 @@ Automate bot to borrow chula license
 uv sync
 ```
 
-## manually run a script
+## Manually run a script
 
 ```bash
 Usage: python main.py <license> [<license> ...]
@@ -23,7 +23,7 @@ Example:
   python main.py foxit zoom
 ```
 
-## or use cronjob (linux)
+## Setup cronjob (linux)
 1. open crontab editor
 
 ```bash
