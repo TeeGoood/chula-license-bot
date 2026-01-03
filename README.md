@@ -11,6 +11,11 @@ Automate bot to borrow chula license
 uv sync
 ```
 
+2. create and fill .env file
+```bash
+cp .env.example .env
+```
+
 ## Manually run a script
 
 ```bash
