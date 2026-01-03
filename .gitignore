@@ -12,3 +12,6 @@ wheels/
 # env
 *.env
 !*.env.example
+
+log
+last_borrowed.pickle
