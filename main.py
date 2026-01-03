@@ -1,5 +1,7 @@
 import os
 import pickle
+import sys
+import textwrap
 from datetime import datetime, timedelta
 
 from dotenv import load_dotenv
@@ -22,6 +24,22 @@ end = start + timedelta(days=7)
 
 
 def main():
+    if len(sys.argv) < 2:
+        print(
+            textwrap.dedent("""
+          Usage: python main.py <application> [<application> ...]
+
+          Applications:
+            foxit | zoom | adobe
+
+          Example:
+            python main.py foxit zoom adobe
+        """)
+        )
+        return
+
+    programs = sys.argv[1:]
+
     try:
         with open("last_borrowed.pickle", "rb") as f:
             last_borrowed = pickle.load(f)
@@ -32,10 +50,6 @@ def main():
             "foxit": epoch,
             "zoom": epoch,
         }
-
-    if now - last_borrowed[option] < timedelta(days=6):
-        print(f"Don't reach borrow period, {(now - last_borrowed[option]).days} days")
-        return
 
     try:
         with sync_playwright() as playwright:
@@ -50,21 +64,29 @@ def main():
             page.locator("button[type='submit']").click()
 
             # borrow license
-            page.goto(f"{url}/Home/Borrow")
-            page.locator("#ProgramLicenseID").select_option(options[option])
-            page.locator("#BorrowDateStr").fill(start.strftime("%d/%m/%Y"))
-            page.keyboard.press("Escape")
-            page.locator("#ExpiryDateStr").fill(end.strftime("%d/%m/%Y"))
-            page.keyboard.press("Escape")
-            page.get_by_role("button", name="Save").click()
+            for program in programs:
+                if now - last_borrowed[program] < timedelta(days=6):
+                    print(
+                        f"{program} don't reach borrow period, {(now - last_borrowed[option]).days} days"
+                    )
+                    continue
+
+                page.goto(f"{url}/Home/Borrow")
+                page.locator("#ProgramLicenseID").select_option(options[program])
+                page.locator("#BorrowDateStr").fill(start.strftime("%d/%m/%Y"))
+                page.keyboard.press("Escape")
+                page.locator("#ExpiryDateStr").fill(end.strftime("%d/%m/%Y"))
+                page.keyboard.press("Escape")
+                page.get_by_role("button", name="Save").click()
+
+                last_borrowed[program] = now
 
             context.close()
             browser.close()
-
-            last_borrowed[option] = now
             pickle.dump(last_borrowed, open("last_borrowed.pickle", "wb"))
-
-            print(f"borrow success at {now.strftime('%d/%m/%Y, %H:%M:%S')}")
+            print(
+                f"borrow {', '.join(programs)} success at {now.strftime('%d/%m/%Y, %H:%M:%S')}"
+            )
     except Exception as e:
         print(f"borrow failed at {now.strftime('%d/%m/%Y, %H:%M:%S')}: {e}")
 
