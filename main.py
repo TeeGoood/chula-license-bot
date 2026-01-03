@@ -1,3 +1,4 @@
+import logging
 import os
 import pickle
 import sys
@@ -8,6 +9,11 @@ from dotenv import load_dotenv
 from playwright.sync_api import sync_playwright
 
 load_dotenv()
+
+logging.basicConfig(
+    format="%(asctime)s - %(levelname)s - %(message)s",
+    level=logging.INFO,
+)
 
 url = "https://licenseportal.it.chula.ac.th"
 email = os.getenv("LOGIN_EMAIL") or ""
@@ -66,7 +72,7 @@ def main():
             # borrow license
             for program in programs:
                 if now - last_borrowed[program] < timedelta(days=6):
-                    print(
+                    logging.info(
                         f"{program} don't reach borrow period, {(now - last_borrowed[option]).days} days"
                     )
                     continue
@@ -84,11 +90,9 @@ def main():
             context.close()
             browser.close()
             pickle.dump(last_borrowed, open("last_borrowed.pickle", "wb"))
-            print(
-                f"borrow {', '.join(programs)} success at {now.strftime('%d/%m/%Y, %H:%M:%S')}"
-            )
-    except Exception as e:
-        print(f"borrow failed at {now.strftime('%d/%m/%Y, %H:%M:%S')}: {e}")
+            logging.info(f"Borrow {', '.join(programs)} success")
+    except Exception:
+        logging.exception("Borrow failed")
 
 
 if __name__ == "__main__":
