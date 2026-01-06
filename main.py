@@ -1,111 +1,82 @@
+import argparse
 import logging
 import os
 import pickle
 import sys
-import textwrap
-from datetime import datetime, timedelta
+from datetime import datetime
+from typing import Any, Dict
 
 from dotenv import load_dotenv
-from playwright.sync_api import sync_playwright
+
+from client import LICENSES, PortalClient
+
+STATE_FILE = "last_borrowed.pickle"
 
 
-def main():
+def load_state() -> Dict[str, datetime]:
+    if not os.path.exists(STATE_FILE):
+        return {}
+    with open(STATE_FILE, "rb") as f:
+        data: Any = pickle.load(f)
+        if isinstance(data, dict):
+            return data
+        return {}
+
+
+def save_state(data: Dict[str, datetime]) -> None:
+    with open(STATE_FILE, "wb") as f:
+        pickle.dump(data, f)
+
+
+def main() -> None:
     load_dotenv()
-    setup_logger()
-
-    url = "https://licenseportal.it.chula.ac.th"
-    email = os.getenv("LOGIN_EMAIL") or ""
-    password = os.getenv("LOGIN_PASSWORD") or ""
-
-    select_options = {
-        "adobe": "5",
-        "foxit": "7",
-        "zoom": "2",
-    }
-
-    now = datetime.now()
-    start = now
-    end = start + timedelta(days=7)
-
-    licenses = get_licenses()
-    last_borrowed = get_last_borrowed()
-
-    with sync_playwright() as playwright:
-        # setup
-        browser = playwright.chromium.launch(headless=True)
-        context = browser.new_context()
-        page = context.new_page()
-
-        # login
-        page.goto(url)
-        page.locator("#UserName").fill(email)
-        page.locator("#Password").fill(password)
-        page.locator("button[type='submit']").click()
-
-        # borrow licenses
-        for license in licenses:
-            # check borrow period
-            if now - last_borrowed[license] < timedelta(days=6):
-                logging.info(
-                    f"{license} don't reach borrow period, will be borrowed in {6 - (now - last_borrowed[license]).days} days"
-                )
-                continue
-
-            page.goto(f"{url}/Home/Borrow")
-            page.locator("#ProgramLicenseID").select_option(select_options[license])
-            page.locator("#BorrowDateStr").fill(start.strftime("%d/%m/%Y"))
-            page.keyboard.press("Escape")
-            page.locator("#ExpiryDateStr").fill(end.strftime("%d/%m/%Y"))
-            page.keyboard.press("Escape")
-            page.get_by_role("button", name="Save").click()
-
-            last_borrowed[license] = now
-            logging.info(f"Borrow {license} success")
-
-        pickle.dump(last_borrowed, open("last_borrowed.pickle", "wb"))
-
-
-def setup_logger():
     logging.basicConfig(
-        format="%(asctime)s [%(levelname)s] %(message)s",
-        level=logging.INFO,
+        format="%(asctime)s [%(levelname)s] %(message)s", level=logging.INFO
     )
 
+    parser = argparse.ArgumentParser()
+    parser.add_argument("licenses", nargs="+", choices=list(LICENSES.keys()))
+    args = parser.parse_args()
 
-def get_licenses():
-    if len(sys.argv) < 2:
-        print(
-            textwrap.dedent("""
-        Usage: python main.py <license> [<license> ...]
+    email: str | None = os.getenv("LOGIN_EMAIL")
+    password: str | None = os.getenv("LOGIN_PASSWORD")
 
-        License:
-          foxit | zoom | adobe
+    if not email or not password:
+        logging.critical("Environment variables LOGIN_EMAIL or LOGIN_PASSWORD missing.")
+        sys.exit(1)
 
-        Example:
-          python main.py foxit zoom
-      """)
-        )
-        exit(1)
+    state: Dict[str, datetime] = load_state()
+    client = PortalClient(email, password)
 
-    return sys.argv[1:]
-
-
-def get_last_borrowed():
     try:
-        with open("last_borrowed.pickle", "rb") as f:
-            last_borrowed = pickle.load(f)
-    except FileNotFoundError:
-        epoch = datetime.fromtimestamp(0)
-        last_borrowed = {
-            "adobe": epoch,
-            "foxit": epoch,
-            "zoom": epoch,
-        }
-    return last_borrowed
+        client.login()
+
+        now = datetime.now()
+
+        for item in args.licenses:
+            last_date: datetime | None = state.get(item)
+
+            max_days = LICENSES[item]["days"]
+
+            renew_threshold = max_days - 1
+
+            if last_date:
+                days_active = (now - last_date).days
+                if days_active < renew_threshold:
+                    logging.info(
+                        f"Skipping {item}: Active for {days_active} days (Expires in {max_days - days_active} days)."
+                    )
+                    continue
+
+            if client.borrow(item):
+                logging.info(f"Successfully borrowed {item}")
+                state[item] = now
+
+        save_state(state)
+
+    except Exception as e:
+        logging.exception(f"Runtime error: {e}")
 
 
 if __name__ == "__main__":
-    try:
-        main()
-    except Exception:
-        logging.exception("Borrow failed")
+    main()
